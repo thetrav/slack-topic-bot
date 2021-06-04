@@ -16,19 +16,54 @@ topics = []
 def sort_topics():
     topics.sort(reverse=True, key=lambda topic: len(topic["votes"]))
 
+def update_home_tab(client, user):
+    blocks = [{
+        "dispatch_action": True,
+        "type": "input",
+        "element": {
+            "type": "plain_text_input",
+            "action_id": "add_topic-action",
+        },
+        "label": {
+            "type": "plain_text",
+            "text": "Add a Topic / Question",
+            "emoji": True,
+        },
+    }]
+    if len(topics) > 0:
+        blocks.append(
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "backlog", "emoji": True},
+            }
+        )
+        blocks.append({"type": "divider"})
+        i = 0
+        for topic in topics:
+            blocks.append(block_for(topic, user))
+            i += 1
+            if i > 20:
+                break
+    # print(f"blocks: {json.dumps(blocks)}")
+    client.views_publish(
+        user_id=user,
+        view={"type": "home", "callback_id": "home_view", "blocks": blocks},
+    )
+
 @app.action("add_topic-action")
 def add_topic_action(ack, body, logger):
     ack()
     # print(f"body: {body}")
+    user = body["user"]["id"]
     topic = {
-        "votes": [body["user"]["id"]],
+        "votes": [user],
         "text": body["actions"][0]["value"],
         "id": str(uuid.uuid4()),
         "created": datetime.now(),
     }
     topics.append(topic)
     sort_topics()
-
+    update_home_tab(app.client, user)
 
 @app.action("toggle_vote")
 def handle_some_action(ack, body, logger):
@@ -43,6 +78,7 @@ def handle_some_action(ack, body, logger):
             else:
                 topic["votes"].append(user)
             sort_topics()
+            update_home_tab(app.client, user)
             return
 
 @app.event("message")
@@ -69,46 +105,9 @@ def block_for(topic, user):
     return section
 
 @app.event("app_home_opened")
-def update_home_tab(client, event, logger):
+def home_opened(client, event, logger):
     # print(f"app home: \n{client} \n{event} \n{logger}")
-    try:
-        blocks = [
-            {
-                "dispatch_action": True,
-                "type": "input",
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "add_topic-action",
-                },
-                "label": {
-                    "type": "plain_text",
-                    "text": "Add a Topic / Question",
-                    "emoji": True,
-                },
-            },
-        ]
-        if len(topics) > 0:
-            blocks.append(
-                {
-                    "type": "header",
-                    "text": {"type": "plain_text", "text": "backlog", "emoji": True},
-                }
-            )
-            blocks.append({"type": "divider"})
-            i = 0
-            for topic in topics:
-                blocks.append(block_for(topic, event["user"]))
-                i += 1
-                if i > 20:
-                    break
-        # print(f"blocks: {json.dumps(blocks)}")
-        client.views_publish(
-            user_id=event["user"],
-            view={"type": "home", "callback_id": "home_view", "blocks": blocks},
-        )
-
-    except Exception as e:
-        logger.error(f"Error publishing home tab: {e}")
+    update_home_tab(client, event["user"])
 
 # Start your app
 if __name__ == "__main__":
