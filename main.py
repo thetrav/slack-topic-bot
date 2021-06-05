@@ -11,10 +11,41 @@ app = App(
     signing_secret=os.environ.get("SLACK_SIGNING_SECRET"),
 )
 
-topics = []
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
 
-def sort_topics():
-    topics.sort(reverse=True, key=lambda topic: len(topic["votes"]))
+# Use the application default credentials
+cred = credentials.ApplicationDefault()
+firebase_admin.initialize_app(cred, {
+  'projectId': os.environ.get("PROJECT_ID"),
+})
+
+db = firestore.client()
+
+topics = db.collection(u'topics')
+
+def get_topic(id):
+    for topic in get_topics():
+        if topic["id"] == id:
+            return topic
+
+def add_topic(topic):
+    doc_ref = topics.document(topic["id"])
+    doc_ref.set(topic)
+
+def delete_topic(topic):
+    topics.document(topic["id"]).delete()
+
+def get_topics():
+    docs = topics.stream()
+    dicts = [d.to_dict() for d in docs]
+    dicts.sort(reverse=True, key=lambda topic: len(topic["votes"]))
+    return dicts
+
+def update_topic(topic):
+    doc_ref = topics.document(topic["id"])
+    doc_ref.set(topic)
 
 def update_home_tab(client, user):
     blocks = [{
@@ -30,6 +61,7 @@ def update_home_tab(client, user):
             "emoji": True,
         },
     }]
+    topics = get_topics()
     if len(topics) > 0:
         blocks.append(
             {
@@ -37,13 +69,14 @@ def update_home_tab(client, user):
                 "text": {"type": "plain_text", "text": "backlog", "emoji": True},
             }
         )
-        blocks.append({"type": "divider"})
         i = 0
         for topic in topics:
-            blocks.append(block_for(topic, user))
+            for block in block_for(topic, user):
+                blocks.append(block)
             i += 1
             if i > 20:
                 break
+    # import json
     # print(f"blocks: {json.dumps(blocks)}")
     client.views_publish(
         user_id=user,
@@ -60,10 +93,21 @@ def add_topic_action(ack, body, logger):
         "text": body["actions"][0]["value"],
         "id": str(uuid.uuid4()),
         "created": datetime.now(),
+        "created_by": user
     }
-    topics.append(topic)
-    sort_topics()
+    add_topic(topic)
     update_home_tab(app.client, user)
+
+@app.action("delete_topic")
+def delete_topic_action(ack, body, logger):
+    ack()
+    # print(f"body: {body}")
+    user = body["user"]["id"]
+    id = body["actions"][0]["value"]
+    topic = get_topic(id)
+    if can_delete(topic, user):
+        delete_topic(topic)
+        update_home_tab(app.client, user)
 
 @app.action("toggle_vote")
 def handle_some_action(ack, body, logger):
@@ -71,13 +115,13 @@ def handle_some_action(ack, body, logger):
     # print(f"body: {body}")
     user = body["user"]["id"]
     topic_id = body["actions"][0]["value"]
-    for topic in topics:
+    for topic in get_topics():
         if topic["id"] == topic_id:
             if user in topic["votes"]:
                 topic["votes"].remove(user)
             else:
                 topic["votes"].append(user)
-            sort_topics()
+            update_topic(topic)
             update_home_tab(app.client, user)
             return
 
@@ -85,24 +129,53 @@ def handle_some_action(ack, body, logger):
 def message_received(client, event, logger):
     print(f"got message: \n{client} \n{event} \n{logger}")
 
+def can_delete(topic, user):
+    if topic["created_by"] != user:
+        return False 
+    if len(topic["votes"]) > 1:
+        return False
+    if len(topic["votes"]) == 1 and topic["votes"][0] != user:
+        return False
+    return True
+
 def block_for(topic, user):
     votes = len(topic["votes"])
     section = {
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f"*{votes}* Votes: {topic['text']}"},
-        "accessory": {
-            "type": "button",
-            "action_id": "toggle_vote",
-            "text": {"type": "plain_text", "emoji": True},
-            "value": topic["id"],
+        "text": {
+            "type": "mrkdwn", 
+            "text": f"*Topic:* {topic['text']} \n *Votes:* {votes}"
+        }
+    }
+    vote_button = {
+        "type": "button",
+        "text": {
+            "type": "plain_text",
+            "text": "Vote"
         },
+        "action_id": "toggle_vote",
+        "value": topic["id"]
     }
     if user in topic["votes"]:
-        section["accessory"]["style"] = "primary"
-        section["accessory"]["text"]["text"] = "unVote"
-    else:
-        section["accessory"]["text"]["text"] = "Vote"
-    return section
+        vote_button["style"] = "primary"
+        vote_button["text"]["text"] = "unVote"
+    actions = {
+        "type": "actions",
+        "elements": [vote_button]
+    }
+    if can_delete(topic, user):
+        actions["elements"].append({
+            "type": "button",
+            "text": {
+                "type": "plain_text",
+                "text": "Delete"
+            },
+            "action_id": "delete_topic",
+            "style": "danger",
+            "value": topic["id"]
+        })
+    
+    return [{"type":"divider"},section, actions]
 
 @app.event("app_home_opened")
 def home_opened(client, event, logger):
@@ -111,4 +184,4 @@ def home_opened(client, event, logger):
 
 # Start your app
 if __name__ == "__main__":
-    app.start(port=int(os.environ.get("PORT", 3000)))
+    app.start(port=int(os.environ.get("PORT", 8080)))

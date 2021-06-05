@@ -1,1 +1,2 @@
 slack_bolt==1.6.1
+firebase-admin==5.0.0
