@@ -198,7 +198,7 @@ def post_to_channels(topic):
 def post_to_channel(topic, channel):
     app.client.chat_postMessage(
         channel=channel,
-        text=f"Todays topic of choice is: \n```\n{topic['text']}\n```\n\nPlease use a thread to discuss!"
+        text=f"With {len(topic['votes'])} votes, todays topic of choice is: \n```\n{topic['text']}\n```\n\nPlease use a thread to discuss!\n\n[see topics](slack://app?team=T03BHQJN5&id=A023VH8MEBD&tab=home)"
     )
 
 @flask_app.route("/pop")
@@ -207,7 +207,8 @@ def pop_topic():
     if len(topics) > 0:
         topic = topics[0]
         post_to_channels(topic)
-        delete_topic(topic)
+        if not request.args.get('testing'):
+            delete_topic(topic)
     return "", 200
 
 # Start your app
