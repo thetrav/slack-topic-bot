@@ -1,9 +1,9 @@
 import os
 import uuid
 from datetime import datetime
-
-# Use the package we installed
+from flask import Flask, request
 from slack_bolt import App
+from slack_bolt.adapter.flask import SlackRequestHandler
 
 # Initializes your app with your bot token and signing secret
 app = App(
@@ -86,7 +86,7 @@ def update_home_tab(client, user):
 @app.action("add_topic-action")
 def add_topic_action(ack, body, logger):
     ack()
-    # print(f"body: {body}")
+    print(f"body: {body}")
     user = body["user"]["id"]
     topic = {
         "votes": [user],
@@ -182,6 +182,34 @@ def home_opened(client, event, logger):
     # print(f"app home: \n{client} \n{event} \n{logger}")
     update_home_tab(client, event["user"])
 
+flask_app = Flask(__name__)
+handler = SlackRequestHandler(app)
+
+@flask_app.route("/slack/events", methods=["POST"])
+def slack_events():
+    return handler.handle(request)
+
+def post_to_channels(topic):
+    resp = app.client.users_conversations(exclude_archived=True)
+    # print(f"got: {resp}")
+    for channel in resp["channels"]:
+        post_to_channel(topic, channel["id"])
+
+def post_to_channel(topic, channel):
+    app.client.chat_postMessage(
+        channel=channel,
+        text=f"Todays topic of choice is: \n```\n{topic['text']}\n```\n\nPlease use a thread to discuss!"
+    )
+
+@flask_app.route("/pop")
+def pop_topic():
+    topics = get_topics()
+    if len(topics) > 0:
+        topic = topics[0]
+        post_to_channels(topic)
+        delete_topic(topic)
+    return "", 200
+
 # Start your app
 if __name__ == "__main__":
-    app.start(port=int(os.environ.get("PORT", 8080)))
+    flask_app.run(port=int(os.environ.get("PORT", 8080)))
