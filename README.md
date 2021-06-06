@@ -11,8 +11,10 @@ python main.py
 # docker
 ```
 docker build -t ilg/qandavoting .
+docker tag ilg/qandavoting gcr.io/initiative-leads-guild/ilg/qandavoting
+docker push gcr.io/initiative-leads-guild/ilg/qandavoting 
 
-docker run -it --rm -p 8080:8080 --env-file env ilg/qandavoting
+docker run -it --rm -p 8080:8080 --env-file env -v ${PWD}:/secrets ilg/qandavoting
 ```
 
 # local auth:
